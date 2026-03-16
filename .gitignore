@@ -8,4 +8,5 @@
 .externalNativeBuild
 .cxx
 *.keystore
+*.jks
 !debug.keystore
