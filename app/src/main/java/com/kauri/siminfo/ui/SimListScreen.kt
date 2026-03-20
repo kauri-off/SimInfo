@@ -21,18 +21,22 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.kauri.siminfo.SimCardInfo
+import com.kauri.siminfo.ui.theme.SimInfoTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,14 +44,13 @@ fun SimListScreen(
     simCards: List<SimCardInfo>,
     onSimClick: (subId: Int) -> Unit,
 ) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
+            LargeTopAppBar(
                 title = { Text("SIM Cards") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
+                scrollBehavior = scrollBehavior,
             )
         },
     ) { padding ->
@@ -70,7 +73,10 @@ fun SimListScreen(
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
                 items(simCards) { sim ->
-                    SimCard(sim = sim, onClick = { onSimClick(sim.subscriptionId) })
+                    SimCard(
+                        sim = sim,
+                        onClick = { onSimClick(sim.subscriptionId) },
+                    )
                 }
             }
         }
@@ -78,7 +84,10 @@ fun SimListScreen(
 }
 
 @Composable
-private fun SimCard(sim: SimCardInfo, onClick: () -> Unit) {
+internal fun SimCard(
+    sim: SimCardInfo,
+    onClick: () -> Unit,
+) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -91,14 +100,14 @@ private fun SimCard(sim: SimCardInfo, onClick: () -> Unit) {
         ) {
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(48.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                modifier = Modifier.size(52.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         text = "${sim.slotIndex + 1}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -111,12 +120,13 @@ private fun SimCard(sim: SimCardInfo, onClick: () -> Unit) {
                     text = sim.displayName.ifBlank { "SIM ${sim.slotIndex + 1}" },
                     style = MaterialTheme.typography.titleMedium,
                 )
+                Spacer(Modifier.height(2.dp))
                 Text(
                     text = sim.carrierName.ifBlank { "Unknown carrier" },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SimBadge(label = sim.networkTypeLabel)
                     if (sim.isNetworkRoaming) {
@@ -140,13 +150,21 @@ private fun SimCard(sim: SimCardInfo, onClick: () -> Unit) {
                 }
             }
 
-            Spacer(Modifier.width(8.dp))
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
+            Spacer(Modifier.width(12.dp))
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
         }
     }
 }
@@ -165,7 +183,44 @@ private fun SimBadge(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = contentColor,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
+    }
+}
+
+@Preview(name = "SIM List")
+@Composable
+private fun SimListScreenPreview() {
+    SimInfoTheme {
+        Scaffold {
+            Box(modifier = Modifier.padding(it)) {
+                SimListScreen(listOf(previewSim1, previewSim2), onSimClick = {})
+            }
+        }
+    }
+}
+
+@Preview(name = "SIM List - Empty")
+@Composable
+private fun SimListScreenEmptyPreview() {
+    SimInfoTheme {
+        Scaffold {
+            Box(modifier = Modifier.padding(it)) {
+                SimListScreen(emptyList(), onSimClick = {})
+            }
+        }
+    }
+}
+
+@Preview(name = "SIM Card Item")
+@Composable
+private fun SimCardPreview() {
+    SimInfoTheme {
+        Scaffold {
+            Box(modifier = Modifier.padding(it)) {
+                SimCard(previewSim2, onClick = {})
+            }
+        }
     }
 }

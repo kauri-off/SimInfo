@@ -3,11 +3,13 @@ package com.kauri.siminfo
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
-import android.os.Build
 import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
+import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
 import androidx.annotation.RequiresPermission
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class SimInfoRepository(private val context: Context) {
 
@@ -43,7 +45,7 @@ class SimInfoRepository(private val context: Context) {
                     phoneTypeLabel = phoneTypeLabel(tm.phoneType),
                     simStateLabel = simStateLabel(tm.simState),
                     isNetworkRoaming = tm.isNetworkRoaming,
-                    callStateLabel = callStateLabel(tm.callState),
+                    callStateLabel = callStateLabel(getCallState(tm)),
                     dataStateLabel = dataStateLabel(tm.dataState),
                 )
             }
@@ -52,26 +54,15 @@ class SimInfoRepository(private val context: Context) {
         }
     }
 
-    // API 33+: getPhoneNumber(); below that use deprecated SubscriptionInfo.getNumber()
     @RequiresPermission(Manifest.permission.READ_PHONE_NUMBERS)
-    @Suppress("DEPRECATION")
     private fun getPhoneNumber(sm: SubscriptionManager, info: SubscriptionInfo): String? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            sm.getPhoneNumber(info.subscriptionId).takeIf { it.isNotBlank() }
-        } else {
-            info.number?.takeIf { it.isNotBlank() }
-        }
+        sm.getPhoneNumber(info.subscriptionId).takeIf { it.isNotBlank() }
 
-    // API 29+: getMccString()/getMncString(); below that use deprecated int fields
-    @Suppress("DEPRECATION")
     private fun getMcc(info: SubscriptionInfo): String =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.mccString ?: ""
-        else info.mcc.toString()
+        info.mccString ?: ""
 
-    @Suppress("DEPRECATION")
     private fun getMnc(info: SubscriptionInfo): String =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.mncString ?: ""
-        else info.mnc.toString()
+        info.mncString ?: ""
 
     private fun iccIdLast4(raw: String?): String? =
         if (!raw.isNullOrBlank() && raw.length >= 4) raw.takeLast(4) else null
@@ -86,20 +77,13 @@ class SimInfoRepository(private val context: Context) {
         TelephonyManager.NETWORK_TYPE_HSDPA,
         TelephonyManager.NETWORK_TYPE_HSUPA,
         TelephonyManager.NETWORK_TYPE_UMTS,
-        TelephonyManager.NETWORK_TYPE_EVDO_0,
-        TelephonyManager.NETWORK_TYPE_EVDO_A,
-        TelephonyManager.NETWORK_TYPE_EVDO_B -> "3G"
         TelephonyManager.NETWORK_TYPE_EDGE,
-        TelephonyManager.NETWORK_TYPE_GPRS,
-        TelephonyManager.NETWORK_TYPE_CDMA,
-        TelephonyManager.NETWORK_TYPE_1xRTT,
-        TelephonyManager.NETWORK_TYPE_IDEN -> "2G"
+        TelephonyManager.NETWORK_TYPE_GPRS -> "2G"
         else -> "Unknown"
     }
 
     private fun phoneTypeLabel(type: Int): String = when (type) {
         TelephonyManager.PHONE_TYPE_GSM -> "GSM"
-        TelephonyManager.PHONE_TYPE_CDMA -> "CDMA"
         TelephonyManager.PHONE_TYPE_SIP -> "SIP"
         else -> "None"
     }
@@ -118,6 +102,21 @@ class SimInfoRepository(private val context: Context) {
         TelephonyManager.SIM_STATE_CARD_IO_ERROR -> "IO Error"
         TelephonyManager.SIM_STATE_CARD_RESTRICTED -> "Restricted"
         else -> "Unknown"
+    }
+
+    private fun getCallState(tm: TelephonyManager): Int {
+        var state = TelephonyManager.CALL_STATE_IDLE
+        val latch = CountDownLatch(1)
+        val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+            override fun onCallStateChanged(callState: Int) {
+                state = callState
+                latch.countDown()
+            }
+        }
+        tm.registerTelephonyCallback({ it.run() }, callback)
+        latch.await(500, TimeUnit.MILLISECONDS)
+        tm.unregisterTelephonyCallback(callback)
+        return state
     }
 
     private fun callStateLabel(state: Int): String = when (state) {

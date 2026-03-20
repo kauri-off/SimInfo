@@ -4,10 +4,8 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.telephony.PhoneStateListener
 import android.telephony.ServiceState
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -16,10 +14,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +32,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,20 +46,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.kauri.siminfo.navigation.Screen
 import com.kauri.siminfo.ui.SimDetailScreen
 import com.kauri.siminfo.ui.SimListScreen
 import com.kauri.siminfo.ui.theme.SimInfoTheme
-
-sealed class Screen {
-    object SimList : Screen()
-    data class SimDetail(val subId: Int) : Screen()
-}
 
 enum class PermissionState { CHECKING, GRANTED_FULL, GRANTED_PARTIAL, DENIED }
 
@@ -81,7 +81,6 @@ class MainActivity : ComponentActivity() {
 private fun SimInfoApp() {
     val context = LocalContext.current
     var permState by remember { mutableStateOf(PermissionState.CHECKING) }
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.SimList) }
 
     val launcher = rememberLauncherForActivityResult(RequestMultiplePermissions()) { results ->
         val phoneState = results[Manifest.permission.READ_PHONE_STATE] == true
@@ -126,7 +125,7 @@ private fun SimInfoApp() {
             }
         }
 
-        PermissionState.DENIED -> PermissionDeniedScreen()
+        PermissionState.DENIED -> PermissionDeniedScreenWithContext()
 
         else -> {
             val phoneNumbersGranted = permState == PermissionState.GRANTED_FULL
@@ -147,67 +146,49 @@ private fun SimInfoApp() {
             // Refresh on real-time telephony changes (network type, call state, data state).
             DisposableEffect(Unit) {
                 val tm = context.getSystemService(TelephonyManager::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val cb = object :
-                        TelephonyCallback(),
-                        TelephonyCallback.DataConnectionStateListener,
-                        TelephonyCallback.CallStateListener,
-                        TelephonyCallback.ServiceStateListener {
-                        override fun onDataConnectionStateChanged(state: Int, networkType: Int) { refreshKey++ }
-                        override fun onCallStateChanged(state: Int) { refreshKey++ }
-                        override fun onServiceStateChanged(serviceState: ServiceState) { refreshKey++ }
-                    }
-                    tm.registerTelephonyCallback(context.mainExecutor, cb)
-                    onDispose { tm.unregisterTelephonyCallback(cb) }
-                } else {
-                    @Suppress("DEPRECATION")
-                    val listener = object : PhoneStateListener() {
-                        override fun onDataConnectionStateChanged(state: Int, networkType: Int) { refreshKey++ }
-                        override fun onCallStateChanged(state: Int, phoneNumber: String?) { refreshKey++ }
-                        override fun onServiceStateChanged(serviceState: ServiceState?) { refreshKey++ }
-                    }
-                    @Suppress("DEPRECATION")
-                    tm.listen(
-                        listener,
-                        PhoneStateListener.LISTEN_DATA_CONNECTION_STATE or
-                            PhoneStateListener.LISTEN_CALL_STATE or
-                            PhoneStateListener.LISTEN_SERVICE_STATE,
-                    )
-                    onDispose {
-                        @Suppress("DEPRECATION")
-                        tm.listen(listener, PhoneStateListener.LISTEN_NONE)
-                    }
+                val cb = object :
+                    TelephonyCallback(),
+                    TelephonyCallback.DataConnectionStateListener,
+                    TelephonyCallback.CallStateListener,
+                    TelephonyCallback.ServiceStateListener {
+                    override fun onDataConnectionStateChanged(state: Int, networkType: Int) { refreshKey++ }
+                    override fun onCallStateChanged(state: Int) { refreshKey++ }
+                    override fun onServiceStateChanged(serviceState: ServiceState) { refreshKey++ }
                 }
+                tm.registerTelephonyCallback(context.mainExecutor, cb)
+                onDispose { tm.unregisterTelephonyCallback(cb) }
             }
 
-            AnimatedContent(
-                targetState = currentScreen,
-                transitionSpec = {
-                    if (initialState is Screen.SimList && targetState is Screen.SimDetail) {
-                        slideInHorizontally { it } togetherWith slideOutHorizontally { -it }
-                    } else {
-                        slideInHorizontally { -it } togetherWith slideOutHorizontally { it }
-                    }
-                },
-                label = "screen",
-            ) { screen ->
-                when (screen) {
-                    is Screen.SimList -> {
-                        SimListScreen(
-                            simCards = simCards,
-                            onSimClick = { subId -> currentScreen = Screen.SimDetail(subId) },
+            val navController = rememberNavController()
+            NavHost(
+                navController = navController,
+                startDestination = Screen.SimList.route,
+            ) {
+                composable(
+                    route = Screen.SimList.route,
+                    exitTransition = { slideOutHorizontally(tween(300)) { -it / 3 } },
+                    popEnterTransition = { slideInHorizontally(tween(300)) { -it / 3 } },
+                ) {
+                    SimListScreen(
+                        simCards = simCards,
+                        onSimClick = { subId ->
+                            navController.navigate(Screen.SimDetail.createRoute(subId))
+                        },
+                    )
+                }
+                composable(
+                    route = Screen.SimDetail.route,
+                    arguments = listOf(navArgument("subId") { type = NavType.IntType }),
+                    enterTransition = { slideInHorizontally(tween(300)) { it } },
+                    popExitTransition = { slideOutHorizontally(tween(300)) { it } },
+                ) { backStackEntry ->
+                    val subId = backStackEntry.arguments!!.getInt("subId")
+                    val sim = simCards.find { it.subscriptionId == subId }
+                    if (sim != null) {
+                        SimDetailScreen(
+                            sim = sim,
+                            onBack = { navController.popBackStack() },
                         )
-                    }
-                    is Screen.SimDetail -> {
-                        val sim = simCards.find { it.subscriptionId == screen.subId }
-                        if (sim != null) {
-                            SimDetailScreen(
-                                sim = sim,
-                                onBack = { currentScreen = Screen.SimList },
-                            )
-                        } else {
-                            currentScreen = Screen.SimList
-                        }
                     }
                 }
             }
@@ -216,8 +197,7 @@ private fun SimInfoApp() {
 }
 
 @Composable
-private fun PermissionDeniedScreen() {
-    val context = LocalContext.current
+internal fun PermissionDeniedScreen(onOpenSettings: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -253,13 +233,31 @@ private fun PermissionDeniedScreen() {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
-        Button(onClick = {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", context.packageName, null)
-            }
-            context.startActivity(intent)
-        }) {
+        Button(onClick = onOpenSettings) {
             Text("Open Settings")
+        }
+    }
+}
+
+@Composable
+private fun PermissionDeniedScreenWithContext() {
+    val context = LocalContext.current
+    PermissionDeniedScreen(onOpenSettings = {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+        }
+        context.startActivity(intent)
+    })
+}
+
+@Preview(name = "Permission Denied")
+@Composable
+private fun PermissionDeniedPreview() {
+    SimInfoTheme {
+        Scaffold {
+            Box(modifier = Modifier.padding(it)) {
+                PermissionDeniedScreen()
+            }
         }
     }
 }
