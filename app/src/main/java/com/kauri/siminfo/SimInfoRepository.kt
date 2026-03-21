@@ -3,6 +3,7 @@ package com.kauri.siminfo
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyCallback
@@ -55,8 +56,15 @@ class SimInfoRepository(private val context: Context) {
     }
 
     @RequiresPermission(Manifest.permission.READ_PHONE_NUMBERS)
-    private fun getPhoneNumber(sm: SubscriptionManager, info: SubscriptionInfo): String? =
-        sm.getPhoneNumber(info.subscriptionId).takeIf { it.isNotBlank() }
+    private fun getPhoneNumber(sm: SubscriptionManager, info: SubscriptionInfo): String? {
+        val number = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            sm.getPhoneNumber(info.subscriptionId)
+        } else {
+            @Suppress("DEPRECATION")
+            info.number
+        }
+        return number.takeIf { it.isNotBlank() }
+    }
 
     private fun getMcc(info: SubscriptionInfo): String =
         info.mccString ?: ""
@@ -104,20 +112,24 @@ class SimInfoRepository(private val context: Context) {
         else -> "Unknown"
     }
 
-    private fun getCallState(tm: TelephonyManager): Int {
-        var state = TelephonyManager.CALL_STATE_IDLE
-        val latch = CountDownLatch(1)
-        val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
-            override fun onCallStateChanged(callState: Int) {
-                state = callState
-                latch.countDown()
+    private fun getCallState(tm: TelephonyManager): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            var state = TelephonyManager.CALL_STATE_IDLE
+            val latch = CountDownLatch(1)
+            val callback = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                override fun onCallStateChanged(callState: Int) {
+                    state = callState
+                    latch.countDown()
+                }
             }
+            tm.registerTelephonyCallback({ it.run() }, callback)
+            latch.await(500, TimeUnit.MILLISECONDS)
+            tm.unregisterTelephonyCallback(callback)
+            state
+        } else {
+            @Suppress("DEPRECATION")
+            tm.callState
         }
-        tm.registerTelephonyCallback({ it.run() }, callback)
-        latch.await(500, TimeUnit.MILLISECONDS)
-        tm.unregisterTelephonyCallback(callback)
-        return state
-    }
 
     private fun callStateLabel(state: Int): String = when (state) {
         TelephonyManager.CALL_STATE_IDLE -> "Idle"
@@ -126,8 +138,6 @@ class SimInfoRepository(private val context: Context) {
         else -> "Unknown"
     }
 
-    // DATA_DISCONNECTING requires API 31; safe to reference — older devices never return it
-    @SuppressLint("NewApi")
     private fun dataStateLabel(state: Int): String = when (state) {
         TelephonyManager.DATA_DISCONNECTED -> "Disconnected"
         TelephonyManager.DATA_CONNECTING -> "Connecting"
