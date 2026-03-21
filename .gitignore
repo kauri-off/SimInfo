@@ -10,3 +10,4 @@
 *.jks
 !debug.keystore
 /app/release
+local.properties
