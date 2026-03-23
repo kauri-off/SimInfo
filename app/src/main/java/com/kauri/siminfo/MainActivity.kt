@@ -1,11 +1,9 @@
 package com.kauri.siminfo
 
 import android.Manifest
-import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import android.telephony.ServiceState
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -29,15 +27,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,7 +60,21 @@ import com.kauri.siminfo.ui.SimDetailScreen
 import com.kauri.siminfo.ui.SimListScreen
 import com.kauri.siminfo.ui.theme.SimInfoTheme
 
-enum class PermissionState { CHECKING, GRANTED_FULL, GRANTED_PARTIAL, DENIED }
+enum class PermissionState { GRANTED_FULL, GRANTED_PARTIAL, DENIED }
+
+private fun resolvePermissionState(context: Context): PermissionState {
+    val phoneState = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_PHONE_STATE
+    ) == PackageManager.PERMISSION_GRANTED
+    val phoneNumbers = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.READ_PHONE_NUMBERS
+    ) == PackageManager.PERMISSION_GRANTED
+    return when {
+        phoneState && phoneNumbers -> PermissionState.GRANTED_FULL
+        phoneState -> PermissionState.GRANTED_PARTIAL
+        else -> PermissionState.DENIED
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,7 +91,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun SimInfoApp() {
     val context = LocalContext.current
-    var permState by remember { mutableStateOf(PermissionState.CHECKING) }
+    var permState by remember { mutableStateOf(resolvePermissionState(context)) }
 
     val launcher = rememberLauncherForActivityResult(RequestMultiplePermissions()) { results ->
         val phoneState = results[Manifest.permission.READ_PHONE_STATE] == true
@@ -92,56 +103,35 @@ private fun SimInfoApp() {
         }
     }
 
-    LaunchedEffect(Unit) {
-        val phoneState = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.READ_PHONE_STATE
-        ) == PackageManager.PERMISSION_GRANTED
-        val phoneNumbers = ContextCompat.checkSelfPermission(
-            context, Manifest.permission.READ_PHONE_NUMBERS
-        ) == PackageManager.PERMISSION_GRANTED
+    // Re-check whenever the app comes back to the foreground (e.g. user granted from Settings).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                permState = resolvePermissionState(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
-        permState = when {
-            phoneState && phoneNumbers -> PermissionState.GRANTED_FULL
-            phoneState -> PermissionState.GRANTED_PARTIAL
-            else -> {
+    when (permState) {
+        PermissionState.DENIED -> PermissionRequestScreen(
+            onRequest = {
                 launcher.launch(
                     arrayOf(
                         Manifest.permission.READ_PHONE_STATE,
                         Manifest.permission.READ_PHONE_NUMBERS,
                     )
                 )
-                PermissionState.CHECKING
             }
-        }
-    }
-
-    when (permState) {
-        PermissionState.CHECKING -> {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-        }
-
-        PermissionState.DENIED -> PermissionDeniedScreenWithContext()
+        )
 
         else -> {
             val phoneNumbersGranted = permState == PermissionState.GRANTED_FULL
             val repo = remember(context) { SimInfoRepository(context) }
             var refreshKey by remember { mutableIntStateOf(0) }
             val simCards = remember(permState, refreshKey) { repo.getSimCards(phoneNumbersGranted) }
-
-            // Refresh whenever the app comes back to the foreground.
-            val lifecycleOwner = LocalLifecycleOwner.current
-            DisposableEffect(lifecycleOwner) {
-                val observer = LifecycleEventObserver { _, event ->
-                    if (event == Lifecycle.Event.ON_RESUME) refreshKey++
-                }
-                lifecycleOwner.lifecycle.addObserver(observer)
-                onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-            }
 
             // Refresh on real-time telephony changes (network type, call state, data state).
             DisposableEffect(Unit) {
@@ -197,7 +187,7 @@ private fun SimInfoApp() {
 }
 
 @Composable
-internal fun PermissionDeniedScreen(onOpenSettings: () -> Unit = {}) {
+internal fun PermissionRequestScreen(onRequest: () -> Unit = {}) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -233,30 +223,19 @@ internal fun PermissionDeniedScreen(onOpenSettings: () -> Unit = {}) {
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
-        Button(onClick = onOpenSettings) {
-            Text("Open Settings")
+        Button(onClick = onRequest) {
+            Text("Grant Permission")
         }
     }
 }
 
+@Preview(name = "Permission Request")
 @Composable
-private fun PermissionDeniedScreenWithContext() {
-    val context = LocalContext.current
-    PermissionDeniedScreen(onOpenSettings = {
-        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", context.packageName, null)
-        }
-        context.startActivity(intent)
-    })
-}
-
-@Preview(name = "Permission Denied")
-@Composable
-private fun PermissionDeniedPreview() {
+private fun PermissionRequestPreview() {
     SimInfoTheme {
         Scaffold {
             Box(modifier = Modifier.padding(it)) {
-                PermissionDeniedScreen()
+                PermissionRequestScreen()
             }
         }
     }

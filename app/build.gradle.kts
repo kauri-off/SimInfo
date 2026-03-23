@@ -15,8 +15,8 @@ android {
         applicationId = "com.kauri.siminfo"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.3"
+        versionCode = 2
+        versionName = "1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
