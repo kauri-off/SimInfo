@@ -3,7 +3,9 @@ package com.kauri.siminfo
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.telephony.PhoneStateListener
 import android.telephony.ServiceState
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager
@@ -116,16 +118,20 @@ private fun SimInfoApp() {
     }
 
     when (permState) {
-        PermissionState.DENIED -> PermissionRequestScreen(
-            onRequest = {
-                launcher.launch(
-                    arrayOf(
-                        Manifest.permission.READ_PHONE_STATE,
-                        Manifest.permission.READ_PHONE_NUMBERS,
-                    )
+        PermissionState.DENIED -> Scaffold { padding ->
+            Box(modifier = Modifier.padding(padding)) {
+                PermissionRequestScreen(
+                    onRequest = {
+                        launcher.launch(
+                            arrayOf(
+                                Manifest.permission.READ_PHONE_STATE,
+                                Manifest.permission.READ_PHONE_NUMBERS,
+                            )
+                        )
+                    }
                 )
             }
-        )
+        }
 
         else -> {
             val phoneNumbersGranted = permState == PermissionState.GRANTED_FULL
@@ -136,17 +142,35 @@ private fun SimInfoApp() {
             // Refresh on real-time telephony changes (network type, call state, data state).
             DisposableEffect(Unit) {
                 val tm = context.getSystemService(TelephonyManager::class.java)
-                val cb = object :
-                    TelephonyCallback(),
-                    TelephonyCallback.DataConnectionStateListener,
-                    TelephonyCallback.CallStateListener,
-                    TelephonyCallback.ServiceStateListener {
-                    override fun onDataConnectionStateChanged(state: Int, networkType: Int) { refreshKey++ }
-                    override fun onCallStateChanged(state: Int) { refreshKey++ }
-                    override fun onServiceStateChanged(serviceState: ServiceState) { refreshKey++ }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val cb = object :
+                        TelephonyCallback(),
+                        TelephonyCallback.DataConnectionStateListener,
+                        TelephonyCallback.CallStateListener,
+                        TelephonyCallback.ServiceStateListener {
+                        override fun onDataConnectionStateChanged(state: Int, networkType: Int) { refreshKey++ }
+                        override fun onCallStateChanged(state: Int) { refreshKey++ }
+                        override fun onServiceStateChanged(serviceState: ServiceState) { refreshKey++ }
+                    }
+                    tm.registerTelephonyCallback(context.mainExecutor, cb)
+                    onDispose { tm.unregisterTelephonyCallback(cb) }
+                } else {
+                    @Suppress("DEPRECATION")
+                    val listener = object : PhoneStateListener() {
+                        override fun onDataConnectionStateChanged(state: Int, networkType: Int) { refreshKey++ }
+                        override fun onCallStateChanged(state: Int, phoneNumber: String?) { refreshKey++ }
+                        override fun onServiceStateChanged(serviceState: ServiceState) { refreshKey++ }
+                    }
+                    @Suppress("DEPRECATION")
+                    tm.listen(
+                        listener,
+                        PhoneStateListener.LISTEN_CALL_STATE or
+                        PhoneStateListener.LISTEN_DATA_CONNECTION_STATE or
+                        PhoneStateListener.LISTEN_SERVICE_STATE
+                    )
+                    @Suppress("DEPRECATION")
+                    onDispose { tm.listen(listener, PhoneStateListener.LISTEN_NONE) }
                 }
-                tm.registerTelephonyCallback(context.mainExecutor, cb)
-                onDispose { tm.unregisterTelephonyCallback(cb) }
             }
 
             val navController = rememberNavController()
